@@ -30,28 +30,84 @@ Luego, ejecutar un nodo (ejemplo):
 ```
 java -cp out com.rafthq.core.Main --config config/sample-node1.properties
 ```
-*(La clase Main se añadirá en el siguiente paso.)*
 
-## Protocolo (borrador)
+## Testing local (3 nodos)
+1. Crear configs para 3 nodos (sample-node1, node2, node3).
+2. En terminales separadas:
+   ```
+   java -cp out com.rafthq.core.Main --config config/sample-node1.properties
+   java -cp out com.rafthq.core.Main --config config/sample-node2.properties
+   java -cp out com.rafthq.core.Main --config config/sample-node3.properties
+   ```
+3. Observar logs para elección (election timeout → CANDIDATE → LEADER).
+4. Verificar que el LEADER envía heartbeats a followers cada 100ms (configurable).
+5. Matar un nodo (Ctrl+C) y observar nueva elección en los supervivientes.
+
+## Protocolo de Mensajes
 Mensajes de texto delimitados por `\n`, campos separados por `|`. Payload binaria se codifica en Base64.
-- `REQUEST_VOTE|term|candidateId|lastLogIndex|lastLogTerm`
-- `REQUEST_VOTE_RESPONSE|term|voteGranted`
-- `APPEND_ENTRIES|term|leaderId|prevLogIndex|prevLogTerm|leaderCommit|entryCount|[base64Entry...]*`
-  - Cada entrada: `index,term,length,payloadBase64` empaquetada en un campo; se concretará en el código.
-- `APPEND_ENTRIES_RESPONSE|term|success|matchIndex`
 
-## Plan de implementación
-1) Modelo de datos RAFT: term, votedFor, log (index, term, payload), commitIndex/lastApplied, nextIndex/matchIndex.
-2) Componentes concurrentes:
-   - Listener de sockets que parsea RPCs.
-   - Election timer por nodo; transición a Candidate y votación.
-   - Heartbeats en Leader (AppendEntries vacíos).
-   - Hilo aplicador que avanza commitIndex y dispara `onCommit`.
-3) API pública:
-   - `appendCommand(byte[] cmd)` solo en líder (followers responden redirección).
-   - Registro de callback `onCommit`.
-4) Persistencia mínima del log/estado a archivo y carga al arranque.
-5) Scripts y pruebas locales con 3 nodos en puertos distintos.
+### RequestVote
+```
+REQUEST_VOTE|<term>|<candidateId>|<lastLogIndex>|<lastLogTerm>
+REQUEST_VOTE_RESPONSE|<term>|<voteGranted>
+```
+
+### AppendEntries (heartbeat y replicación)
+```
+APPEND_ENTRIES|<term>|<leaderId>|<prevLogIndex>|<prevLogTerm>|<leaderCommit>|<entryCount>|[<entry1>|<entry2>|...]
+APPEND_ENTRIES_RESPONSE|<term>|<success>|<matchIndex>
+```
+Cada entrada: `<index>,<term>,<length>,<payloadBase64>`
+
+Ejemplo (3 nodos):
+- Node1: `REQUEST_VOTE|1|node1|0|0` → Node2, Node3
+- Node2, Node3 responden `REQUEST_VOTE_RESPONSE|1|true`
+- Node1 se convierte en LEADER
+- Node1 envía periódicamente `APPEND_ENTRIES|1|node1|0|0|0|0` (heartbeat)
+
+## Implementado (Paso 1-2): Protocolo, estructuras y elección
+
+### Clases de dato
+- **`RaftLogEntry`**: índice, término, comando (bytes).
+- **`RaftLog`**: almacén en memoria thread-safe de entradas. Métodos: `append()`, `get()`, `sliceFrom()`, `truncateFrom()`, `lastIndex()`, `lastTerm()`.
+- **`NodeConfig`**: carga `.properties` (nodeId, host/port, peers, timeouts, storage dir).
+
+### Mensajes RPC
+- **`RequestVoteRequest/Response`**: term, candidateId, lastLogIndex/Term, voteGranted.
+- **`AppendEntriesRequest/Response`**: term, leaderId, prevLogIndex/Term, leaderCommit, entries, success, matchIndex.
+- **`MessageCodec`**: serializa/deserializa a texto (`|`-separado) con Base64 para payloads.
+
+### Red
+- **`RpcServer`**: servidor socket bloqueante, despacha mensajes a handler.
+- **`RpcClient`**: cliente socket para enviar RequestVote/AppendEntries a peers.
+
+### Orquestación RAFT
+- **`RaftNode`** (completado):
+  - **Estados**: FOLLOWER → election timeout → CANDIDATE → RequestVote → LEADER
+  - **Timers**: elección con timeout aleatorio (min/max configurable), heartbeats periódicos en LEADER.
+  - **Handlers**:
+    - `handleRequestVote()`: valida term, comprueba log up-to-date, otorga voto.
+    - `handleAppendEntries()`: valida prevLog, trunca conflictos, aplica commitIndex.
+  - **Votación**: contar votos, alcanzar mayoría → LEADER.
+  - **Heartbeats**: enviar AppendEntries vacíos periódicamente; followers responden con matchIndex.
+  - **stepDown()**: si recibe term mayor, volver a FOLLOWER.
+  - **API**: `appendCommand()` (solo LEADER), `getState()`, `getCurrentTerm()`.
+
+- **`StateMachine`**: interfaz para callback `onCommit(byte[] cmd)` (aplicación de comandos comprometidos).
+
+### Entrada
+- **`Main.java`**: carga config desde `.properties`, inicia RaftNode, mantiene proceso vivo.
+
+Compilación:
+```
+javac -d out $(find src/main/java -name "*.java")
+```
+
+## Próximos pasos (Paso 3-6)
+1. **Replicación y commit**: Apply loop (`lastApplied` → `commitIndex`) que invoca `onCommit()`.
+2. **Persistencia**: guardar/cargar currentTerm, votedFor, log a disco.
+3. **Testing local**: 3 nodos en puertos distintos; verificar elección, heartbeats, replicación.
+4. **Scripts de arranque**: batch/shell para iniciar cluster en LAN/WiFi.
 
 ## Configuración
 Ver `config/sample-node1.properties` como referencia. Campos clave:
