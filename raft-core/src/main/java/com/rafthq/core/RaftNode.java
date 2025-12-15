@@ -27,6 +27,7 @@ public class RaftNode {
     private final StateMachine stateMachine;
     private final RpcServer rpcServer;
     private final RpcClient rpcClient;
+    private final PersistentState persistence;
 
     // Persistent state (thread-safe access)
     private volatile RaftState state = RaftState.FOLLOWER;
@@ -55,6 +56,8 @@ public class RaftNode {
         this.stateMachine = stateMachine;
         this.rpcServer = new RpcServer(config.getHost(), config.getPort(), this::handleMessage);
         this.rpcClient = new RpcClient();
+        this.persistence = new PersistentState(config.getStorageDir());
+        loadPersistentState();
     }
 
     public void start() {
@@ -62,7 +65,34 @@ public class RaftNode {
         scheduleElectionTimer();
         startApplyLoop();
         LOG.info(() -> "Node " + config.getNodeId() + " started as FOLLOWER on " +
-                config.getHost() + ":" + config.getPort());
+                config.getHost() + ":" + config.getPort() + " (term=" + currentTerm.get() + ")");
+    }
+    
+    private void loadPersistentState() {
+        try {
+            int loadedTerm = persistence.loadTerm();
+            currentTerm.set(loadedTerm);
+            String loadedVotedFor = persistence.loadVotedFor();
+            votedFor = loadedVotedFor;
+            List<RaftLogEntry> entries = persistence.loadLog();
+            for (RaftLogEntry entry : entries) {
+                log.append(entry);
+            }
+            if (loadedTerm > 0 || !entries.isEmpty()) {
+                LOG.info(() -> "Loaded: term=" + loadedTerm + " votedFor=" + loadedVotedFor + " entries=" + entries.size());
+            }
+        } catch (Exception e) {
+            LOG.log(Level.WARNING, "Failed to load persistent state", e);
+        }
+    }
+    
+    private void savePersistentState() {
+        try {
+            persistence.saveTerm(currentTerm.get());
+            persistence.saveVotedFor(votedFor);
+        } catch (Exception e) {
+            LOG.log(Level.WARNING, "Failed to save persistent state", e);
+        }
     }
 
     /**
@@ -77,7 +107,9 @@ public class RaftNode {
             }
             int index = log.lastIndex() + 1;
             int term = currentTerm.get();
-            log.append(new RaftLogEntry(index, term, command));
+            RaftLogEntry entry = new RaftLogEntry(index, term, command);
+            log.append(entry);
+            persistence.appendLogEntry(entry);
             LOG.fine(() -> "Appended command at index " + index + " term " + term);
             return true;
         }
@@ -133,6 +165,7 @@ public class RaftNode {
         state = RaftState.CANDIDATE;
         int term = currentTerm.incrementAndGet();
         votedFor = config.getNodeId();
+        savePersistentState();
         LOG.info(() -> "Node " + config.getNodeId() + " became CANDIDATE term " + term);
     }
 
@@ -166,6 +199,7 @@ public class RaftNode {
                 state = RaftState.FOLLOWER;
                 currentTerm.set(newTerm);
                 votedFor = null;
+                savePersistentState();
                 LOG.info(() -> "Node " + config.getNodeId() + " stepped down to FOLLOWER term " + newTerm);
                 scheduleElectionTimer();
             }
@@ -284,9 +318,11 @@ public class RaftNode {
                     var existing = log.get(e.getIndex());
                     if (existing.isPresent() && existing.get().getTerm() != e.getTerm()) {
                         log.truncateFrom(e.getIndex());
+                        persistence.truncateLog(e.getIndex());
                     }
                     if (!existing.isPresent()) {
                         log.append(e);
+                        persistence.appendLogEntry(e);
                         lastNewIndex = e.getIndex();
                     }
                 }

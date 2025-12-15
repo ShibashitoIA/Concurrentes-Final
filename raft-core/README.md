@@ -73,10 +73,25 @@ storage.dir=./storage/node1
 ```
 Regla práctica: `heartbeat.interval` debe ser mucho menor que `election.timeout.min` para evitar elecciones innecesarias.
 
+## Persistencia (term, votedFor, log)
+- Ubicación: `data/node{id}/` (basado en `storage.dir` del config)
+- Archivos:
+  - `term.txt`: Term actual (número)
+  - `votedFor.txt`: ID del candidato votado (o vacío)
+  - `log.txt`: Entradas del log (formato: `index,term,base64payload`, una por línea)
+- Automática: se guarda al cambiar term, votedFor, o agregar/truncar entradas
+- Verificar: `cat data/node1/term.txt` muestra el term persistido
+
+## Tests
+- `./test_cluster.sh` arranca 3 nodos en background y muestra logs en `/tmp/node*.log`
+- `./test_e2e.sh` elige líder, muestra estado y pasos para enviar comandos
+- `./test_persistence.sh` verifica que el estado sobrevive reinicios de nodos
+
 ## Troubleshooting breve
 - Sin líder / split votes: sube `election.timeout.max`
 - BindException: mata procesos previos `pkill -f com.rafthq.core.Main`
 - Connection refused: peers mal configurados o nodo caído
+- Archivos de persistence faltando: revisar permisos en carpeta `data/`
 
 ## Tests rápidos
 - `./test_cluster.sh` arranca 3 nodos en background y muestra logs en `/tmp/node*.log`
