@@ -103,11 +103,15 @@ Compilación:
 javac -d out $(find src/main/java -name "*.java")
 ```
 
-## Próximos pasos (Paso 3-6)
-1. **Replicación y commit**: Apply loop (`lastApplied` → `commitIndex`) que invoca `onCommit()`.
-2. **Persistencia**: guardar/cargar currentTerm, votedFor, log a disco.
-3. **Testing local**: 3 nodos en puertos distintos; verificar elección, heartbeats, replicación.
-4. **Scripts de arranque**: batch/shell para iniciar cluster en LAN/WiFi.
+### Commit y Apply (Paso 3)
+- **Apply loop**: hilo en background que monitorea `commitIndex` y aplica entradas (`lastApplied` → `commitIndex`) invocando `onCommit()` en orden.
+- **advanceCommitIndex()**: Leader calcula mayoría basado en `matchIndex[]`; avanza `commitIndex` cuando mayoría reconoce entrada del term actual.
+- **Integración**: `sendHeartbeatToPeer()` llama `advanceCommitIndex()` tras actualizar `matchIndex`.
+
+## Próximos pasos (Paso 4-6)
+1. **Persistencia**: guardar/cargar currentTerm, votedFor, log a disco en `storage.dir`.
+2. **Testing end-to-end**: cliente envía `appendCommand()`, verificar replicación y `onCommit()` en followers.
+3. **Scripts de arranque**: batch/shell para iniciar cluster en LAN/WiFi.
 
 ## Configuración
 Ver `config/sample-node1.properties` como referencia. Campos clave:

@@ -60,6 +60,7 @@ public class RaftNode {
     public void start() {
         rpcServer.start();
         scheduleElectionTimer();
+        startApplyLoop();
         LOG.info(() -> "Node " + config.getNodeId() + " started as FOLLOWER on " +
                 config.getHost() + ":" + config.getPort());
     }
@@ -245,8 +246,9 @@ public class RaftNode {
                 grant = false;
             }
 
+            final boolean granted = grant;
             LOG.fine(() -> "RequestVote from " + req.candidateId + " term " + req.term +
-                    " -> " + (grant ? "GRANTED" : "DENIED"));
+                    " -> " + (granted ? "GRANTED" : "DENIED"));
             return new RequestVoteResponse(myTerm, grant);
         }
     }
@@ -373,6 +375,7 @@ public class RaftNode {
             if (resp.success) {
                 nextIndex.put(peer, Math.max(nextIndex.getOrDefault(peer, 0), resp.matchIndex + 1));
                 matchIndex.put(peer, resp.matchIndex);
+                advanceCommitIndex();
             } else {
                 int idx = nextIndex.getOrDefault(peer, log.lastIndex() + 1);
                 if (idx > 0) {
@@ -381,6 +384,61 @@ public class RaftNode {
             }
         } catch (Exception e) {
             LOG.log(Level.FINE, "Heartbeat RPC failed to " + peer, e);
+        }
+    }
+
+    // ============ Commit and Apply ============
+    /**
+     * Start background thread that applies committed entries to state machine.
+     */
+    private void startApplyLoop() {
+        scheduler.scheduleAtFixedRate(() -> {
+            while (commitIndex > lastApplied) {
+                lastApplied++;
+                var entry = log.get(lastApplied);
+                if (entry.isPresent()) {
+                    byte[] command = entry.get().getPayload();
+                    try {
+                        stateMachine.onCommit(command);
+                        LOG.fine(() -> "Applied entry " + lastApplied + " to state machine");
+                    } catch (Exception e) {
+                        LOG.log(Level.WARNING, "State machine error at index " + lastApplied, e);
+                    }
+                }
+            }
+        }, 100, 50, TimeUnit.MILLISECONDS);
+    }
+
+    /**
+     * Leader: advance commitIndex if majority of peers have replicated up to N.
+     * Called after updating matchIndex.
+     */
+    private void advanceCommitIndex() {
+        if (state != RaftState.LEADER) {
+            return;
+        }
+
+        int lastIdx = log.lastIndex();
+        for (int n = commitIndex + 1; n <= lastIdx; n++) {
+            final int idx = n;
+            var entry = log.get(idx);
+            if (entry.isEmpty() || entry.get().getTerm() != currentTerm.get()) {
+                continue;
+            }
+
+            // Count replicas (self + peers that have matchIndex >= n)
+            int count = 1; // self
+            for (String peer : config.getPeers()) {
+                if (matchIndex.getOrDefault(peer, 0) >= idx) {
+                    count++;
+                }
+            }
+
+            int majority = (config.getPeers().size() + 1) / 2 + 1;
+            if (count >= majority) {
+                commitIndex = idx;
+                LOG.fine(() -> "Advanced commitIndex to " + idx);
+            }
         }
     }
 }

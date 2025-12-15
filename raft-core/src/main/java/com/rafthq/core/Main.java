@@ -3,6 +3,8 @@ package com.rafthq.core;
 import java.io.IOException;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import java.nio.charset.StandardCharsets;
+import java.util.Scanner;
 
 /**
  * Entry point: load node configuration and start RAFT node.
@@ -40,8 +42,22 @@ public class Main {
             };
 
             // Create and start node
-            RaftNode node = new RaftNode(config, stateMachine);
+            RaftNode node = new RaftNode(config, (cmd) -> {
+                System.out.println("Applied: " + new String(cmd, StandardCharsets.UTF_8));
+            });
             node.start();
+
+            // Loop interactivo para enviar comandos al líder
+            Scanner sc = new Scanner(System.in);
+            System.out.println("Type a line to append (only works on leader):");
+            while (sc.hasNextLine()) {
+                String line = sc.nextLine();
+                if (line.isEmpty()) continue;
+                boolean ok = node.appendCommand(line.getBytes(StandardCharsets.UTF_8));
+                if (!ok) {
+                    System.out.println("Not leader. Try on the current leader terminal.");
+                }
+            }
 
             // Keep the process alive
             Thread.currentThread().join();
