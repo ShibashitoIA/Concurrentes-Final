@@ -426,4 +426,59 @@ public class MLP {
             this.gradB = gradB;
         }
     }
+    
+        public int[] getLayerSizes() {
+        return layerSizes.clone();
+    }
+
+    public HiddenActivation getHiddenActivation() {
+        return hiddenActivation;
+    }
+
+    public OutputActivation getOutputActivation() {
+        return outputActivation;
+    }
+
+    public double[][][] exportWeightsCopy() {
+        int L = layerSizes.length - 1;
+        double[][][] out = new double[layerSizes.length][][];
+        for (int l = 1; l <= L; l++) {
+            out[l] = new double[layerSizes[l]][layerSizes[l - 1]];
+            for (int i = 0; i < layerSizes[l]; i++) {
+                System.arraycopy(weights[l][i], 0, out[l][i], 0, layerSizes[l - 1]);
+            }
+        }
+        return out;
+    }
+
+    public double[][] exportBiasesCopy() {
+        int L = layerSizes.length - 1;
+        double[][] out = new double[layerSizes.length][];
+        for (int l = 1; l <= L; l++) {
+            out[l] = new double[layerSizes[l]];
+            System.arraycopy(biases[l], 0, out[l], 0, layerSizes[l]);
+        }
+        return out;
+    }
+
+    public void importParameters(double[][][] newWeights, double[][] newBiases) {
+        int L = layerSizes.length - 1;
+
+        for (int l = 1; l <= L; l++) {
+            if (newWeights[l].length != layerSizes[l]) {
+                throw new IllegalArgumentException("weights layer " + l + " rows mismatch");
+            }
+            if (newWeights[l][0].length != layerSizes[l - 1]) {
+                throw new IllegalArgumentException("weights layer " + l + " cols mismatch");
+            }
+            if (newBiases[l].length != layerSizes[l]) {
+                throw new IllegalArgumentException("biases layer " + l + " mismatch");
+            }
+
+            for (int i = 0; i < layerSizes[l]; i++) {
+                System.arraycopy(newWeights[l][i], 0, weights[l][i], 0, layerSizes[l - 1]);
+            }
+            System.arraycopy(newBiases[l], 0, biases[l], 0, layerSizes[l]);
+        }
+    }
 }

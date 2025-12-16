@@ -3,8 +3,8 @@ package main
 const (
 	NodeID   = "go-worker-1"
 	Host     = "0.0.0.0"
-	RaftPort = 9004
-	HttpPort = 8004
+	RaftPort = 9003
+	HttpPort = 8003
 )
 
 var Peers = []string{
