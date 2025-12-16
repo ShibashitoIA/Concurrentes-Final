@@ -10,7 +10,7 @@ Worker en Go que actúa como nodo seguidor simplificado de Raft y ejecuta comand
 - Config por constantes: `Host=0.0.0.0`, `RaftPort=9003`, `HttpPort=8003`, `NodeID=go-worker-1` (`config.go`).
 
 ## Requisitos
-- Go >= 1.20 (go.mod declara 1.25.4).
+- Go >= 1.20 (go.mod declara 1.25.4). (Puedes descargar golang [aqui ](https://go.dev/dl/))
 - Puertos libres: TCP 9003 y HTTP 8003.
 
 ## Prueba de comunicación rápida con raft-core (importante)
