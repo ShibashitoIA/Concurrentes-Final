@@ -1,68 +1,101 @@
 # raft-core (Java)
+Implementación Raft en Java 11+ con sockets TCP y hilos. Esta guía es para el equipo: mensajes, comandos y cómo se propagan.
 
-Núcleo RAFT y capa de red entre workers. Implementación en Java 11+ con sockets crudos y hilos.
+## Qué hace
+- Estados: Follower/Candidate/Leader con elección por timeouts aleatorios
+- AppendEntries para replicar log y heartbeats
+- Regla de commit por mayoría y apply ordenado vía `onCommit`
+- API de app: `appendCommand(byte[] command)` (solo líder)
+- Persistencia opcional: term, votedFor, log
 
-## Objetivos
-- Estados RAFT: Follower, Candidate, Leader.
-- RPC: RequestVote, AppendEntries (heartbeats y replicación de log).
-- API para la aplicación: `appendCommand(byte[] command)` y callback `onCommit(byte[] command)`.
-- Concurrencia con hilos: recepción, heartbeats, timeouts, envíos a peers; sincronización del log y estado.
-- Persistencia básica del log y estado (archivo append) y configuración por propiedades.
-
-## Estructura inicial
-- `config/` archivos `.properties` por nodo (IDs, host/puerto, peers, timeouts, rutas de log).
-- `src/main/java/com/rafthq/core` código Java del núcleo RAFT.
-- `scripts/` arranque múltiple (se agregará más adelante).
-
-### Código actual (esqueleto)
-- `NodeConfig`: carga de propiedades.
-- `RaftState`, `RaftLog`, `RaftLogEntry`.
-- `StateMachine`: callback `onCommit`.
-- `RaftNode`: orquestación básica, timers stub y heartbeats vacíos.
-- `RpcServer`, `RpcClient`: sockets bloqueantes con mensajes una línea.
-- `MessageCodec`: serialización texto para RequestVote y AppendEntries (Base64 para payloads).
-
-## Compilación rápida (sin build tool)
+## Estructura
 ```
-javac -d out $(find src/main/java -name "*.java")
+raft-core/
+├── config/                   # .properties por nodo
+├── src/main/java/com/rafthq/core/
+│   ├── RaftNode.java         # Lógica principal Raft
+│   ├── RaftLog*.java         # Log y entradas
+│   ├── RpcServer/Client.java # RPC TCP
+│   ├── MessageCodec.java     # Serialización texto
+│   ├── NodeConfig.java       # Configuración
+│   ├── PersistentState.java  # Persistencia básica
+│   └── Main.java             # Entrada
+├── test_cluster.sh           # Arranque 3 nodos (bg)
+├── test_e2e.sh               # Test end-to-end
+└── out/                      # Binarios compilados
 ```
-Luego, ejecutar un nodo (ejemplo):
+
+## Compilar
+```bash
+cd raft-core
+mkdir -p out
+javac -d out src/main/java/com/rafthq/core/*.java
 ```
+
+## Ejecutar (3 terminales)
+```bash
 java -cp out com.rafthq.core.Main --config config/sample-node1.properties
+java -cp out com.rafthq.core.Main --config config/sample-node2.properties
+java -cp out com.rafthq.core.Main --config config/sample-node3.properties
 ```
-*(La clase Main se añadirá en el siguiente paso.)*
+Cuando veas "became LEADER", escribe líneas en la terminal del líder; se replican y aplican en todos como "Applied: ...".
 
-## Protocolo (borrador)
-Mensajes de texto delimitados por `\n`, campos separados por `|`. Payload binaria se codifica en Base64.
-- `REQUEST_VOTE|term|candidateId|lastLogIndex|lastLogTerm`
-- `REQUEST_VOTE_RESPONSE|term|voteGranted`
-- `APPEND_ENTRIES|term|leaderId|prevLogIndex|prevLogTerm|leaderCommit|entryCount|[base64Entry...]*`
-  - Cada entrada: `index,term,length,payloadBase64` empaquetada en un campo; se concretará en el código.
-- `APPEND_ENTRIES_RESPONSE|term|success|matchIndex`
+## Mensajes RPC (texto sobre TCP)
+- RequestVote: `REQUEST_VOTE|term|candidateId|lastLogIndex|lastLogTerm`
+- VoteResponse: `VOTE_RESPONSE|term|voteGranted`
+- AppendEntries: `APPEND_ENTRIES|term|leaderId|prevLogIndex|prevLogTerm|leaderCommit|entryCount|<entry1>|...`
+- AppendResponse: `APPEND_RESPONSE|term|success|matchIndex`
+- Entrada: `index,term,payloadBase64`
 
-## Plan de implementación
-1) Modelo de datos RAFT: term, votedFor, log (index, term, payload), commitIndex/lastApplied, nextIndex/matchIndex.
-2) Componentes concurrentes:
-   - Listener de sockets que parsea RPCs.
-   - Election timer por nodo; transición a Candidate y votación.
-   - Heartbeats en Leader (AppendEntries vacíos).
-   - Hilo aplicador que avanza commitIndex y dispara `onCommit`.
-3) API pública:
-   - `appendCommand(byte[] cmd)` solo en líder (followers responden redirección).
-   - Registro de callback `onCommit`.
-4) Persistencia mínima del log/estado a archivo y carga al arranque.
-5) Scripts y pruebas locales con 3 nodos en puertos distintos.
+## Convención de comandos (payload)
+- Un **command** es `byte[]` opaco para Raft. La app (state machine) decide el formato.
+- En esta demo, cada línea ingresada por stdin del líder se envía como bytes UTF-8 y se aplica con `onCommit` en todos los nodos.
+- Para integrar con otros módulos, define un esquema claro (ej. `OP|arg1|arg2|...` en texto) y pásalo como bytes al `appendCommand` del líder. Los followers lo aplican idéntico.
 
-## Configuración
-Ver `config/sample-node1.properties` como referencia. Campos clave:
-- `node.id` identificador único del nodo.
-- `node.host`, `node.port` dirección local de escucha.
-- `peers` lista de `host:port` de los demás nodos.
-- `election.timeout.min.ms`, `election.timeout.max.ms`, `heartbeat.interval.ms`.
-- `storage.dir` carpeta para log y estado.
+## Propagación de operaciones de cliente
+1) Cliente habla con el **líder** y llama `appendCommand(payload)`
+2) Líder agrega entrada al log local y envía AppendEntries a los peers
+3) Cada follower valida `prevLogIndex/Term`, anexa entradas y responde `success`
+4) Líder actualiza `matchIndex/nextIndex`, calcula mayoría y avanza `commitIndex`
+5) Todos los nodos (incluido el líder) aplican en orden en el apply loop: `onCommit(payload)`
 
-## Próximos pasos
-- Añadir clases base (`RaftNode`, `RaftLog`, `RpcServer`, `RpcClient`).
-- Implementar timers y heartbeats.
-- Conectar `appendCommand` con replicación y commit rule.
-- Crear scripts de arranque múltiple y pruebas.
+## Configuración mínima (sample-node1)
+```properties
+node.id=node1
+node.host=127.0.0.1
+node.port=9001
+node.peers=127.0.0.1:9002,127.0.0.1:9003
+# Timeouts (ms)
+election.timeout.min=500
+election.timeout.max=1000
+heartbeat.interval=200
+storage.dir=./storage/node1
+```
+Regla práctica: `heartbeat.interval` debe ser mucho menor que `election.timeout.min` para evitar elecciones innecesarias.
+
+## Persistencia (term, votedFor, log)
+- Ubicación: `data/node{id}/` (basado en `storage.dir` del config)
+- Archivos:
+  - `term.txt`: Term actual (número)
+  - `votedFor.txt`: ID del candidato votado (o vacío)
+  - `log.txt`: Entradas del log (formato: `index,term,base64payload`, una por línea)
+- Automática: se guarda al cambiar term, votedFor, o agregar/truncar entradas
+- Verificar: `cat data/node1/term.txt` muestra el term persistido
+
+## Tests
+- `./test_cluster.sh` arranca 3 nodos en background y muestra logs en `/tmp/node*.log`
+- `./test_e2e.sh` elige líder, muestra estado y pasos para enviar comandos
+- `./test_persistence.sh` verifica que el estado sobrevive reinicios de nodos
+
+## Troubleshooting breve
+- Sin líder / split votes: sube `election.timeout.max`
+- BindException: mata procesos previos `pkill -f com.rafthq.core.Main`
+- Connection refused: peers mal configurados o nodo caído
+- Archivos de persistence faltando: revisar permisos en carpeta `data/`
+
+## Tests rápidos
+- `./test_cluster.sh` arranca 3 nodos en background y muestra logs en `/tmp/node*.log`
+- `./test_e2e.sh` elige líder, muestra estado y pasos para enviar comandos
+
+## Licencia
+Proyecto educativo para el curso de Sistemas Concurrentes 2025-2.# raft-core (Java)

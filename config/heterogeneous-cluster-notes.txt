@@ -1,0 +1,93 @@
+# Configuración para 3 nodos heterogéneos
+# Este setup demuestra:
+# - Node 1: AI Worker (Java) - Puerto 9001
+# - Node 2: Storage Worker (Java) - Puerto 9002
+# - Node 3: Storage Worker (otro lenguaje/LP2) - Puerto 9003
+
+# ==========================================
+# NODE 1: AI Worker (Persona 2)
+# config/ai-worker-node1.properties
+# ==========================================
+node.id=ai-worker-1
+node.host=127.0.0.1
+node.port=9001
+node.peers=127.0.0.1:9002,127.0.0.1:9003
+
+# Timeouts (ms)
+election.timeout.min=500
+election.timeout.max=1000
+heartbeat.interval=200
+
+# Persistencia
+storage.dir=./data/ai-worker-1
+
+# Específico de AI Worker
+models.dir=./models/ai-worker-1
+training.threads=4
+
+# ==========================================
+# NODE 2: Storage Worker Java (Persona 3)
+# config/storage-worker-node2.properties
+# ==========================================
+node.id=storage-worker-2
+node.host=127.0.0.1
+node.port=9002
+node.peers=127.0.0.1:9001,127.0.0.1:9003
+
+# Timeouts (ms)
+election.timeout.min=500
+election.timeout.max=1000
+heartbeat.interval=200
+
+# Persistencia
+storage.dir=./data/storage-worker-2
+
+# Específico de Storage Worker
+files.dir=./files/storage-worker-2
+http.monitor.port=8082
+
+# ==========================================
+# NODE 3: Storage Worker (LP2/Persona 5)
+# config/storage-worker-node3.properties
+# ==========================================
+node.id=storage-worker-3
+node.host=127.0.0.1
+node.port=9003
+node.peers=127.0.0.1:9001,127.0.0.1:9002
+
+# Timeouts (ms)
+election.timeout.min=500
+election.timeout.max=1000
+heartbeat.interval=200
+
+# Persistencia
+storage.dir=./data/storage-worker-3
+
+# Específico de Storage Worker
+files.dir=./files/storage-worker-3
+http.monitor.port=8083
+
+# ==========================================
+# NOTAS DE CONFIGURACIÓN
+# ==========================================
+
+# Para despliegue en LAN/WiFi, cambiar:
+# node.host=192.168.1.10 (IP real de la máquina)
+# node.peers=192.168.1.11:9002,192.168.1.12:9003
+
+# Para Windows (Persona 5):
+# storage.dir=.\\data\\storage-worker-3
+# files.dir=.\\files\\storage-worker-3
+
+# Puertos:
+# - 9001-9003: RPC entre nodos RAFT
+# - 8081-8083: HTTP monitors (storage workers)
+# - 5001-5003: (opcional) API de cliente
+
+# Timeouts:
+# - election.timeout debe ser > 3x heartbeat.interval
+# - Ajustar según latencia de red (LAN vs WiFi)
+
+# Threads:
+# - AI Worker: training.threads debería ser ≤ número de cores
+# - Storage Worker: usa single-threaded I/O (suficiente para demo)
