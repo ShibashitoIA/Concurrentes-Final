@@ -1,0 +1,86 @@
+/* Estilos generales */
+.root {
+    -fx-font-family: "Segoe UI", "Arial", sans-serif;
+    -fx-font-size: 13px;
+}
+
+/* Pestañas */
+.tab-pane {
+    -fx-tab-min-height: 35px;
+}
+
+.tab {
+    -fx-background-color: #ecf0f1;
+    -fx-font-weight: bold;
+}
+
+.tab:selected {
+    -fx-background-color: #3498db;
+    -fx-text-fill: white;
+}
+
+/* Botones */
+.button {
+    -fx-background-radius: 5;
+    -fx-padding: 8 15 8 15;
+    -fx-cursor: hand;
+}
+
+.button:hover {
+    -fx-opacity: 0.8;
+}
+
+.button:pressed {
+    -fx-opacity: 0.6;
+}
+
+/* Campos de texto */
+.text-field {
+    -fx-background-radius: 3;
+    -fx-border-color: #bdc3c7;
+    -fx-border-radius: 3;
+}
+
+.text-field:focused {
+    -fx-border-color: #3498db;
+    -fx-border-width: 2;
+}
+
+/* Áreas de texto */
+.text-area {
+    -fx-background-radius: 3;
+    -fx-border-color: #bdc3c7;
+    -fx-border-radius: 3;
+}
+
+.text-area .content {
+    -fx-background-color: #fafafa;
+}
+
+/* Tablas */
+.table-view {
+    -fx-background-color: white;
+}
+
+.table-view .column-header {
+    -fx-background-color: #34495e;
+    -fx-text-fill: white;
+    -fx-font-weight: bold;
+}
+
+.table-row-cell:selected {
+    -fx-background-color: #3498db;
+    -fx-text-fill: white;
+}
+
+/* Progress Indicator */
+.progress-indicator {
+    -fx-progress-color: #3498db;
+}
+
+/* Labels en títulos */
+.title-label {
+    -fx-font-size: 16px;
+    -fx-font-weight: bold;
+    -fx-text-fill: #2c3e50;
+}
