@@ -1,195 +1,30 @@
-# ModuloIA (Java) — Motor de IA: Tabular + TF-IDF + Imágenes
+# ModuloIA (Java) — Librería de IA (TABULAR / TF-IDF / IMAGEN) + MLP + Entrenamiento paralelo
 
-Este repositorio implementa el **módulo de IA** (librería) del proyecto distribuido. Provee **entrenamiento** y **predicción** usando un **MLP (Multi-Layer Perceptron)** sobre vectores numéricos `double[]`, y soporta 3 tipos de entrada:
+Este repositorio implementa el **módulo de IA** del proyecto distribuido. Es una **librería Java** que permite:
 
-- **TABULAR**: CSV numérico → `double[]`
-- **TF-IDF**: texto → vector TF-IDF → `double[]`
-- **IMAGE**: imagen → resize + (grayscale/RGB) + normalización → `double[]`
+- Entrenar modelos (MLP) a partir de:
+  - **TABULAR** (CSV numérico)
+  - **TF-IDF** (texto en TSV → vector TF-IDF)
+  - **IMAGEN** (TSV con rutas → preprocesamiento a vector)
+- Realizar predicciones sobre un `modelId`
+- Persistir modelos en disco y volverlos a cargar
+- Entrenamiento **paralelo (data-parallel)** usando `numThreads`
 
-> Este módulo no implementa RAFT, sockets ni HTTP. Está diseñado para ser invocado por el Worker del sistema (otro repositorio).
+> Este repositorio NO incluye RAFT, sockets, HTTP ni UI. Lo consume el Worker (otro servicio).
 
 ---
 
 ## Requisitos
 
-- **Java 21** (según configuración actual del proyecto).
-- **Maven** (NetBeans compatible).
+- Java **21** (según configuración del proyecto)
+- Maven
 
----
-
-## Dependencias
-
-- **JUnit 4** (tests).
-- **maven-surefire-plugin** (ejecución de tests).
-
----
-
-## Estructura del proyecto
-
-```
-
-src/main/java/com/mycompany/moduloia/
-api/            Requests, enums y AIService (orquestación)
-data/           Loaders y estructuras de dataset (TABULAR, TFIDF, IMAGE)
-features/       Extractores de features (Tabular, TF-IDF, Image) + preprocesamiento imagen
-mlp/            MLP + TrainingSample + activaciones
-storage/        (pendiente/por implementar) persistencia de modelos, extractor state, registry
-util/           utilidades varias
-
-```
-
----
-
-## Concepto general: pipeline por tipo de entrada
-
-Todos los tipos terminan en lo mismo:
-
-```
-
-raw input (csv/text/image) -> FeatureExtractor -> double[] -> MLP -> output double[]
-
-````
-
-Los extractores actuales son:
-
-- `TabularExtractor` (`double[]` → `double[]`)
-- `TfidfVectorizer` (`String` → `double[]`, con estado serializable)
-- `ImageExtractor` (`String path` → `double[]`, usando `ImagePreprocessor`, con estado serializable)
-
----
-
-## Formatos de dataset soportados
-
-### 1) TABULAR (CSV numérico)
-
-Archivo `.csv` (con o sin header). Cada fila contiene inputs y targets.
-
-**Opción A: targets explícitos (recomendado)**
-- Columnas: `inputSize + outputSize`
-- Ejemplo (binaria, `outputSize=1`):
-```csv
-x1,x2,x3,label
-0.1,0.2,0.3,1
-0.0,0.5,0.7,0
-````
-
-**Opción B: multiclase compacta**
-
-* Columnas: `inputSize + 1`
-* Última columna es `classIndex` (0..K-1) y se convierte a one-hot internamente (`outputSize=K`)
-
-```csv
-x1,x2,class
-0.1,0.2,2
-```
-
-Loader: `TabularCsvLoader`
-
----
-
-### 2) TF-IDF (TSV: `text<TAB>label`)
-
-Archivo `.tsv` con (opcional) header.
-
-* El texto puede tener comas, comillas, etc. (por eso se usa TSV).
-* Se usa **el último TAB** como separador: todo lo anterior es texto y lo último es label.
-
-Ejemplo:
-
-```tsv
-text	label
-hola mundo	0
-compra ahora oferta	1
-```
-
-Labels:
-
-* `outputSize == 1`: label numérico (binaria/regresión)
-* `outputSize > 1`: label es `classIndex` entero (0..K-1) → one-hot
-
-Loader: `TextTsvLoader`
-
----
-
-### 3) IMAGE (TSV: `path<TAB>label`) — enfoque A (paths)
-
-Archivo `.tsv` con (opcional) header.
-
-Ejemplo:
-
-```tsv
-path	label
-datasets/images/cat1.png	0
-datasets/images/dog1.jpg	1
-```
-
-* El loader **devuelve rutas** (no preprocesa imágenes).
-* La vectorización la hace `ImageExtractor` (resize, grayscale/RGB, normalización).
-* Recomendación: rutas **relativas al archivo TSV** o absolutas.
-
-Labels:
-
-* `outputSize == 1`: label numérico (binaria/regresión)
-* `outputSize > 1`: label es `classIndex` entero → one-hot
-
-Loader: `ImageTsvLoader` (modo A: paths)
-
----
-
-## Preprocesamiento de imágenes
-
-Implementado en `ImagePreprocessor`:
-
-1. Lectura con `ImageIO`.
-2. Redimensionado a `width x height`.
-3. Conversión:
-
-   * grayscale: 1 canal (feature size = `width*height`)
-   * RGB: 3 canales (feature size = `width*height*3`)
-4. Normalización opcional a `[0,1]` (`pixel/255.0`).
-5. Flatten a `double[]`.
-
----
-
-## MLP (Multi-Layer Perceptron)
-
-Implementación propia (sin librerías externas) en `com.mycompany.moduloia.mlp.MLP`:
-
-* Feed-forward fully connected.
-* Inicialización Xavier/Glorot Uniform.
-* Activación en ocultas: `ReLU` o `Tanh`.
-* Activación de salida:
-
-  * `SIGMOID` (binaria)
-  * `SOFTMAX` (multiclase)
-  * `LINEAR` (regresión)
-* Entrenamiento:
-
-  * backpropagation
-  * mini-batch gradient descent
-* Loss:
-
-  * Sigmoid + Binary Cross Entropy
-  * Softmax + Cross Entropy
-  * Linear + MSE
-
-Clases principales:
-
-* `TrainingSample`
-* `HiddenActivation`, `OutputActivation`
-* `MLP`
-
----
-
-## Cómo compilar y correr tests
-
-### Compilar / empaquetar
-
+Compilar:
 ```bash
 mvn clean install
-```
+````
 
-### Ejecutar tests
+Tests (si están agregados):
 
 ```bash
 mvn test
@@ -197,41 +32,231 @@ mvn test
 
 ---
 
-## Estado actual y próximos pasos
+## Estructura principal
 
-Implementado:
-
-* Extractores: Tabular, TF-IDF, Image (con serialización de estado en TF-IDF e Image).
-* Loaders: CSV tabular, TSV texto, TSV imágenes (paths).
-* MLP completo: forward + entrenamiento + losses.
-
-Pendiente (próximo):
-
-* **AIService** completo integrando:
-
-  * loaders + extractors + MLP
-  * manejo de `TrainingRequest`/`PredictRequest` con `InputType`
-* **Persistencia de modelos**:
-
-  * guardar/cargar pesos del MLP
-  * guardar/cargar `extractorState` (TF-IDF vocab/idf; Image params)
-  * índice `modelId → path`
-* **Entrenamiento paralelo (data parallel)** con threads y combinación de pesos para mejorar desempeño.
-* Tests unitarios adicionales para persistencia y consistencia de extractores.
+```
+src/main/java/com/mycompany/moduloia/
+    api/            InputType, TrainingRequest, PredictRequest, AIService
+    data/           Loaders y datasets (tabular/texto/imagen)
+    features/       Extractores: TabularExtractor, TfidfVectorizer, ImageExtractor + ImagePreprocessor
+    mlp/            MLP + TrainingSample + entrenamiento paralelo (ParallelMLPTrainer)
+    storage/        Persistencia binaria: ModelBundle, ModelSerializer, ModelRegistry
+```
 
 ---
 
-## Notas de integración con el sistema distribuido
+## Concepto de funcionamiento
 
-* El Worker del sistema (otro repositorio) debe:
+Todos los inputs se convierten a un vector `double[]`:
 
-  * guardar datasets/archivos en disco,
-  * invocar `trainModel(...)` con la ruta del dataset,
-  * invocar `predict(...)` con:
+* TABULAR: `double[]` viene directo del CSV
+* TF-IDF: `String` → `TfidfVectorizer` → `double[]`
+* IMAGEN: `path` → `ImagePreprocessor` → `double[]`
 
-    * `double[]` (TABULAR), o
-    * `String text` (TF-IDF), o
-    * `String imagePath` (IMAGE),
-  * y gestionar el `modelId` retornado.
+Luego:
 
+* `double[]` → `MLP` → `double[]` output
 
+---
+
+## API pública: AIService
+
+Clase: `com.mycompany.moduloia.api.AIService`
+
+### Crear servicio
+
+```java
+Path modelsDir = Paths.get("models");
+AIService ai = new AIService(modelsDir);
+```
+
+* `modelsDir`: carpeta donde se guardarán modelos (`<modelId>.bin`) y el índice `models_index.tsv`.
+
+---
+
+## Entrenamiento
+
+### TrainingRequest
+
+El entrenamiento se realiza con:
+
+```java
+String modelId = ai.trainModel(trainingRequest);
+```
+
+Parámetros comunes en `TrainingRequest`:
+
+* `inputType`: `TABULAR`, `TFIDF`, `IMAGE`
+* `datasetPath`: ruta al dataset
+* `outputSize`: 1 (binaria/regresión) o K (multiclase)
+* `epochs`, `learningRate`, `numThreads`
+* `hasHeader`
+
+#### TABULAR
+
+* `inputSize`: número de features (columnas de entrada)
+* dataset: CSV numérico (ver formato abajo)
+
+#### TF-IDF
+
+* `maxVocab`: tamaño máximo de vocabulario
+* dataset: TSV `text<TAB>label`
+
+#### IMAGE
+
+* `imageWidth`, `imageHeight`, `grayscale`
+* dataset: TSV `path<TAB>label` (**loader devuelve rutas; extractor preprocesa**)
+
+---
+
+## Predicción
+
+```java
+double[] yhat = ai.predict(predictRequest);
+```
+
+La predicción usa el `modelId` para cargar el modelo (desde cache o disco).
+
+### PredictRequest (según tipo)
+
+* TABULAR: usar `tabularInput`
+* TFIDF: usar `textInput`
+* IMAGE: usar `imagePath`
+
+Ejemplo TABULAR:
+
+```java
+PredictRequest pr = new PredictRequest(InputType.TABULAR, modelId, new double[]{1.0, 2.0, 3.0}, null, null);
+double[] out = ai.predict(pr);
+```
+
+Ejemplo TF-IDF:
+
+```java
+PredictRequest pr = new PredictRequest(InputType.TFIDF, modelId, null, "hola compra oferta", null);
+double[] out = ai.predict(pr);
+```
+
+Ejemplo IMAGEN:
+
+```java
+PredictRequest pr = new PredictRequest(InputType.IMAGE, modelId, null, null, "datasets/img/cat1.png");
+double[] out = ai.predict(pr);
+```
+
+> Nota: el `AIService` valida que el `inputType` del request coincida con el `inputType` del modelo guardado.
+
+---
+
+## Guardar / cargar modelos
+
+Normalmente `trainModel()` ya guarda el modelo en `modelsDir`.
+
+### Guardar a otro directorio
+
+```java
+ai.saveModel(modelId, Paths.get("exported_models"));
+```
+
+### Cargar desde un directorio
+
+```java
+ai.loadModel(modelId, Paths.get("exported_models"));
+```
+
+---
+
+## Formatos de dataset
+
+### TABULAR (CSV)
+
+Soporta 2 formatos:
+
+1. **Targets explícitos**: columnas = `inputSize + outputSize`
+
+```csv
+x1,x2,x3,label
+0.1,0.2,0.3,1
+0.0,0.5,0.7,0
+```
+
+2. **Multiclase compacta**: columnas = `inputSize + 1` y última columna es `classIndex`
+
+```csv
+x1,x2,class
+0.1,0.2,2
+```
+
+(Se convierte a one-hot según `outputSize`)
+
+Loader: `TabularCsvLoader`
+
+---
+
+### TF-IDF (TSV)
+
+Formato: `text<TAB>label`
+
+```tsv
+text	label
+hola mundo	0
+compra ahora oferta	1
+```
+
+* Si `outputSize == 1`: label numérico (0/1 o real)
+* Si `outputSize > 1`: label es `classIndex` entero (0..K-1) → one-hot
+
+Loader: `TextTsvLoader`
+Extractor: `TfidfVectorizer` (guarda estado: vocabulario + idf)
+
+---
+
+### IMAGEN (TSV, modo A)
+
+Formato: `path<TAB>label`
+
+```tsv
+path	label
+datasets/images/cat1.png	0
+datasets/images/dog1.jpg	1
+```
+
+* El loader devuelve rutas (paths).
+* El extractor se encarga del preprocesamiento (resize + grayscale/RGB + normalización).
+* Rutas relativas se interpretan respecto al directorio del archivo TSV.
+
+Loader: `ImageTsvLoader`
+Extractor: `ImageExtractor` + `ImagePreprocessor`
+
+---
+
+## Entrenamiento paralelo
+
+Se usa un enfoque **data-parallel**:
+
+* Se divide el dataset en `numThreads` particiones
+* Cada hilo entrena una réplica del modelo sobre su partición (1 epoch)
+* Se promedian pesos/bias (model averaging) y se actualiza el modelo global
+
+Clase: `com.mycompany.moduloia.mlp.ParallelMLPTrainer`
+
+El `AIService` lo invoca automáticamente usando `req.numThreads`.
+
+---
+
+## Notas para integración con el Worker (P3)
+
+El Worker debería:
+
+1. Al recibir un comando comprometido (RAFT):
+
+   * guardar dataset en disco
+2. Llamar a:
+
+   * `trainModel(req)` con `datasetPath` local
+3. Guardar `modelId` resultante en su estado (y replicarlo si corresponde)
+4. Para predicción:
+
+   * usar el `modelId` y el input correspondiente (tabular/texto/ruta imagen)
+
+Este módulo no hace networking; solo procesa archivos y memoria local.
