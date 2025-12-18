@@ -37,6 +37,8 @@ public class ClientService {
         String b64 = Base64.getEncoder().encodeToString(fileData);
         long size = fileData.length;
 
+        logger.info("STORE_FILE -> name={}, sizeBytes={}, md5={}", trainingFile.getName(), size, md5);
+
         // 1) STORE_FILE|fileName|checksumMD5|sizeBytes|chunkBase64
         String storeCmd = String.join("|",
                 "STORE_FILE",
@@ -47,11 +49,18 @@ public class ClientService {
         );
         Response storeResp = networkClient.sendCommandText(storeCmd);
         if (!storeResp.isSuccess()) {
+            logger.warn("STORE_FILE falló: {}", storeResp.getMessage());
             return storeResp;
         }
 
         // 2) TRAIN_MODEL|modelId|inputType|datasetPath|hyperparamsBase64
         String hyperparams = buildDefaultTabularHyperparams(trainingFile);
+        String[] hpArr = hyperparams.split(",", -1);
+        if (hpArr.length != 10) {
+            logger.warn("Hyperparams TABULAR no tienen 10 campos: {} -> {} campos", hyperparams, hpArr.length);
+        } else {
+            logger.info("Hyperparams TABULAR (10 ok): {}", hyperparams);
+        }
         String hpB64 = Base64.getEncoder().encodeToString(hyperparams.getBytes(StandardCharsets.UTF_8));
         String trainCmd = String.join("|",
                 "TRAIN_MODEL",
@@ -60,6 +69,7 @@ public class ClientService {
                 trainingFile.getName(),
                 hpB64
         );
+        logger.info("TRAIN_MODEL TABULAR -> modelId={}, dataset={}, hpB64Len={}", modelName, trainingFile.getName(), hpB64.length());
         return networkClient.sendCommandText(trainCmd);
     }
 
@@ -74,6 +84,7 @@ public class ClientService {
         String zipName = imageFolder.getName() + ".zip";
         String md5 = computeMD5Hex(zipBytes);
         String b64 = Base64.getEncoder().encodeToString(zipBytes);
+        logger.info("STORE_FILE (ZIP) -> name={}, sizeBytes={}, md5={}", zipName, zipBytes.length, md5);
 
         // 1) STORE_FILE del ZIP
         String storeCmd = String.join("|",
@@ -85,11 +96,18 @@ public class ClientService {
         );
         Response storeResp = networkClient.sendCommandText(storeCmd);
         if (!storeResp.isSuccess()) {
+            logger.warn("STORE_FILE ZIP falló: {}", storeResp.getMessage());
             return storeResp;
         }
 
         // 2) TRAIN_MODEL (IMAGE) con hiperparámetros por defecto
         String hyperparams = buildDefaultImageHyperparams(width, height, !isColor);
+        String[] hpArr = hyperparams.split(",", -1);
+        if (hpArr.length != 10) {
+            logger.warn("Hyperparams IMAGE no tienen 10 campos: {} -> {} campos", hyperparams, hpArr.length);
+        } else {
+            logger.info("Hyperparams IMAGE (10 ok): {}", hyperparams);
+        }
         String hpB64 = Base64.getEncoder().encodeToString(hyperparams.getBytes(StandardCharsets.UTF_8));
         String trainCmd = String.join("|",
                 "TRAIN_MODEL",
@@ -98,6 +116,7 @@ public class ClientService {
                 zipName,
                 hpB64
         );
+        logger.info("TRAIN_MODEL IMAGE -> modelId={}, datasetZip={}, hpB64Len={}", modelName, zipName, hpB64.length());
         return networkClient.sendCommandText(trainCmd);
     }
 

@@ -173,6 +173,7 @@ public class TrainImagePanel extends VBox {
                     if (response.isSuccess()) {
                         logArea.appendText("✓ Entrenamiento iniciado exitosamente\n");
                         logArea.appendText("Mensaje: " + response.getMessage() + "\n");
+                        logArea.appendText("(Se envió ZIP por STORE_FILE y TRAIN_MODEL IMAGE con 10 hiperparámetros)\n");
                         if (response.getData().containsKey("modelId")) {
                             logArea.appendText("ID del modelo: " + response.getData().get("modelId") + "\n");
                         }

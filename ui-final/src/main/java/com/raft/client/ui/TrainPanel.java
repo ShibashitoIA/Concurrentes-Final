@@ -139,6 +139,7 @@ public class TrainPanel extends VBox {
                     if (response.isSuccess()) {
                         logArea.appendText("✓ Entrenamiento iniciado exitosamente\n");
                         logArea.appendText("Mensaje: " + response.getMessage() + "\n");
+                        logArea.appendText("(Se envió STORE_FILE con MD5 y TRAIN_MODEL TABULAR con 10 hiperparámetros)\n");
                         if (response.getData().containsKey("modelId")) {
                             logArea.appendText("ID del modelo: " + response.getData().get("modelId") + "\n");
                         }
