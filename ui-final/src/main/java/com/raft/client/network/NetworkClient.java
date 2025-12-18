@@ -1,24 +1,31 @@
 package com.raft.client.network;
 
 import com.google.gson.Gson;
-import com.raft.client.protocol.Command;
+import com.google.gson.JsonSyntaxException;
 import com.raft.client.protocol.Response;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.*;
-import java.net.Socket;
+import java.io.BufferedInputStream;
+import java.io.BufferedOutputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
 import java.nio.charset.StandardCharsets;
 
 /**
- * Cliente de red que maneja la comunicación con el servidor RAFT.
- * Implementa lógica de redirección automática al líder.
+ * Cliente HTTP para el monitor del main-worker.
+ * Envía comandos como texto (OP|arg1|...) a POST /command y
+ * consulta estado/modelos vía GET.
  */
 public class NetworkClient {
     private static final Logger logger = LoggerFactory.getLogger(NetworkClient.class);
     private static final int MAX_REDIRECTS = 5;
     private static final int TIMEOUT_MS = 10000; // 10 segundos
-    
+
     private final Gson gson;
     private String currentHost;
     private int currentPort;
@@ -29,100 +36,62 @@ public class NetworkClient {
         this.gson = new Gson();
     }
 
-    /**
-     * Envía un comando al servidor con manejo automático de redirección.
-     */
-    public Response sendCommand(Command command) throws IOException {
-        return sendCommandWithRedirect(command, 0);
+    private String baseUrl() {
+        return "http://" + currentHost + ":" + currentPort;
     }
 
-    private Response sendCommandWithRedirect(Command command, int redirectCount) throws IOException {
-        if (redirectCount >= MAX_REDIRECTS) {
+    /**
+     * Envía un comando de texto al monitor: POST /command
+     */
+    public Response sendCommandText(String commandLine) throws IOException {
+        return sendCommandTextWithRedirect(commandLine, 0);
+    }
+
+    private Response sendCommandTextWithRedirect(String commandLine, int redirects) throws IOException {
+        if (redirects >= MAX_REDIRECTS) {
             throw new IOException("Demasiadas redirecciones. El cluster puede estar inestable.");
         }
 
-        logger.info("Enviando comando {} a {}:{}", command.getType(), currentHost, currentPort);
+        logger.info("POST /command -> {}", commandLine);
+        Response response = doPost("/command", "text/plain; charset=utf-8", commandLine.getBytes(StandardCharsets.UTF_8));
 
-        try (Socket socket = new Socket(currentHost, currentPort)) {
-            socket.setSoTimeout(TIMEOUT_MS);
-
-            // Enviar comando
-            OutputStream out = socket.getOutputStream();
-            DataOutputStream dos = new DataOutputStream(out);
-
-            // Serializar comando a JSON
-            String jsonCommand = gson.toJson(command);
-            byte[] jsonBytes = jsonCommand.getBytes(StandardCharsets.UTF_8);
-
-            // Protocolo: [longitud del JSON][JSON][datos binarios si existen]
-            dos.writeInt(jsonBytes.length);
-            dos.write(jsonBytes);
-
-            // Si hay datos binarios, enviarlos
-            if (command.getData() != null && command.getData().length > 0) {
-                dos.writeInt(command.getData().length);
-                dos.write(command.getData());
-            } else {
-                dos.writeInt(0);
-            }
-            dos.flush();
-
-            // Recibir respuesta
-            InputStream in = socket.getInputStream();
-            DataInputStream dis = new DataInputStream(in);
-
-            int responseLength = dis.readInt();
-            if (responseLength <= 0 || responseLength > 10_000_000) { // Límite de seguridad 10MB
-                throw new IOException("Longitud de respuesta inválida: " + responseLength);
-            }
-
-            byte[] responseBytes = new byte[responseLength];
-            dis.readFully(responseBytes);
-
-            String jsonResponse = new String(responseBytes, StandardCharsets.UTF_8);
-            Response response = gson.fromJson(jsonResponse, Response.class);
-
-            // Leer datos binarios si existen (para descargas de archivos)
-            int dataLength = dis.readInt();
-            if (dataLength > 0) {
-                if (dataLength > 100_000_000) { // Límite de seguridad 100MB
-                    throw new IOException("Archivo demasiado grande: " + dataLength + " bytes");
-                }
-                byte[] binaryData = new byte[dataLength];
-                dis.readFully(binaryData);
-                response.setBinaryData(binaryData);
-                logger.info("Datos binarios recibidos: {} bytes", dataLength);
-            }
-
-            logger.info("Respuesta recibida: {}", response);
-
-            // Manejar redirección
-            if (response.isRedirect() && response.getLeaderHost() != null) {
-                logger.info("Redirigiendo al líder: {}:{}", 
-                    response.getLeaderHost(), response.getLeaderPort());
-                
-                this.currentHost = response.getLeaderHost();
-                this.currentPort = response.getLeaderPort();
-                
-                // Reintentar con el nuevo líder
-                return sendCommandWithRedirect(command, redirectCount + 1);
-            }
-
-            return response;
-
-        } catch (IOException e) {
-            logger.error("Error al comunicarse con {}:{}", currentHost, currentPort, e);
-            throw new IOException("Error de conexión: " + e.getMessage(), e);
+        // Manejo de redirección si el monitor retorna líder
+        if (response.isRedirect() && response.getLeaderHost() != null && response.getLeaderPort() > 0) {
+            logger.info("Redirigiendo al líder {}:{}", response.getLeaderHost(), response.getLeaderPort());
+            this.currentHost = response.getLeaderHost();
+            this.currentPort = response.getLeaderPort();
+            return sendCommandTextWithRedirect(commandLine, redirects + 1);
         }
+
+        return response;
     }
 
     /**
-     * Verifica la conexión con el servidor actual.
+     * GET genérico que retorna contenido como String.
+     */
+    public String getString(String path) throws IOException {
+        HttpURLConnection conn = open(path, "GET");
+        int code = conn.getResponseCode();
+        byte[] body = readBody(conn, code);
+        return new String(body, StandardCharsets.UTF_8);
+    }
+
+    /**
+     * GET que retorna bytes (para descargas de archivos).
+     */
+    public byte[] getBytes(String path) throws IOException {
+        HttpURLConnection conn = open(path, "GET");
+        int code = conn.getResponseCode();
+        return readBody(conn, code);
+    }
+
+    /**
+     * Verifica la conexión consultando /status.
      */
     public boolean testConnection() {
-        try (Socket socket = new Socket(currentHost, currentPort)) {
-            socket.setSoTimeout(3000);
-            return true;
+        try {
+            String body = getString("/status");
+            return body != null && !body.isEmpty();
         } catch (IOException e) {
             logger.warn("No se pudo conectar a {}:{}", currentHost, currentPort);
             return false;
@@ -138,15 +107,69 @@ public class NetworkClient {
         logger.info("Servidor actualizado a {}:{}", host, port);
     }
 
-    public String getCurrentHost() {
-        return currentHost;
+    public String getCurrentHost() { return currentHost; }
+    public int getCurrentPort() { return currentPort; }
+    public String getCurrentServer() { return currentHost + ":" + currentPort; }
+
+    // ===== Internos HTTP =====
+
+    private HttpURLConnection open(String path, String method) throws IOException {
+        URL url = new URL(baseUrl() + path);
+        HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+        conn.setRequestMethod(method);
+        conn.setConnectTimeout(TIMEOUT_MS);
+        conn.setReadTimeout(TIMEOUT_MS);
+        conn.setDoInput(true);
+        return conn;
     }
 
-    public int getCurrentPort() {
-        return currentPort;
+    private Response doPost(String path, String contentType, byte[] body) throws IOException {
+        HttpURLConnection conn = open(path, "POST");
+        conn.setDoOutput(true);
+        conn.setRequestProperty("Content-Type", contentType);
+        try (OutputStream os = new BufferedOutputStream(conn.getOutputStream())) {
+            os.write(body);
+        }
+
+        int code = conn.getResponseCode();
+        byte[] responseBody = readBody(conn, code);
+
+        String text = new String(responseBody, StandardCharsets.UTF_8).trim();
+        Response response = new Response();
+        response.setSuccess(code >= 200 && code < 300);
+        response.setMessage(text);
+
+        // Intentar parsear JSON estructurado
+        try {
+            Response parsed = gson.fromJson(text, Response.class);
+            if (parsed != null) {
+                // Si el servidor devuelve nuestro esquema, úsalo
+                response = parsed;
+            }
+        } catch (JsonSyntaxException ignore) {
+            // No era JSON, usamos texto plano en message
+        }
+
+        return response;
     }
 
-    public String getCurrentServer() {
-        return currentHost + ":" + currentPort;
+    private byte[] readBody(HttpURLConnection conn, int code) throws IOException {
+        InputStream is;
+        try {
+            is = (code >= 200 && code < 300) ? conn.getInputStream() : conn.getErrorStream();
+            if (is == null) is = conn.getInputStream();
+        } catch (IOException e) {
+            is = conn.getErrorStream();
+            if (is == null) throw e;
+        }
+        try (BufferedInputStream bis = new BufferedInputStream(is);
+             ByteArrayOutputStream baos = new ByteArrayOutputStream()) {
+            byte[] buf = new byte[8192];
+            int r;
+            while ((r = bis.read(buf)) != -1) {
+                baos.write(buf, 0, r);
+            }
+            return baos.toByteArray();
+        }
     }
 }
