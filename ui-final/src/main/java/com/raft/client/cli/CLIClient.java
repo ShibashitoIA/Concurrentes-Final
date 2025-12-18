@@ -1,11 +1,5 @@
 package com.raft.client.cli;
 
-import com.raft.client.network.ClientService;
-import com.raft.client.protocol.ModelInfo;
-import com.raft.client.protocol.Response;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
@@ -14,6 +8,14 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
+import java.util.UUID;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import com.raft.client.network.ClientService;
+import com.raft.client.protocol.ModelInfo;
+import com.raft.client.protocol.Response;
 
 /**
  * Cliente de línea de comandos para interactuar con el sistema RAFT.
@@ -113,9 +115,13 @@ public class CLIClient {
             System.exit(1);
         }
 
-        String modelName = args.length > 2 ? args[2] : file.getName().replaceAll("\\.[^.]+$", "");
+        // Generar ID único automáticamente (el sistema asigna el identificador)
+        String prefix = args.length > 2 ? args[2] : file.getName().replaceAll("\\.[^.]+$", "");
+        String uuid = UUID.randomUUID().toString().substring(0, 8);
+        String modelName = prefix + "-" + uuid;
 
-        System.out.println("Entrenando modelo '" + modelName + "' con archivo: " + file.getName());
+        System.out.println("Entrenando modelo con ID asignado: '" + modelName + "'");
+        System.out.println("Archivo: " + file.getName());
         System.out.println("Tamaño del archivo: " + (file.length() / 1024) + " KB");
         System.out.println("Conectando al servidor: " + clientService.getCurrentServer());
         System.out.println();
@@ -154,12 +160,15 @@ public class CLIClient {
             System.exit(1);
         }
 
-        String modelName = args.length > 2 ? args[2] : folder.getName() + "-model";
+        // Generar ID único automáticamente (el sistema asigna el identificador)
+        String prefix = args.length > 2 ? args[2] : folder.getName();
+        String uuid = UUID.randomUUID().toString().substring(0, 8);
+        String modelName = prefix + "-" + uuid;
         int width = args.length > 3 ? Integer.parseInt(args[3]) : 28;
         int height = args.length > 4 ? Integer.parseInt(args[4]) : 28;
         boolean isColor = args.length > 5 ? Boolean.parseBoolean(args[5]) : false;
 
-        System.out.println("Entrenando modelo de imágenes '" + modelName + "'");
+        System.out.println("Entrenando modelo de imágenes con ID asignado: '" + modelName + "'");
         System.out.println("Dataset: " + folder.getName());
         System.out.println("Tamaño de imagen: " + width + "x" + height);
         System.out.println("Tipo: " + (isColor ? "RGB (3 canales)" : "Escala de grises"));

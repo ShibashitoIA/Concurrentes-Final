@@ -1,16 +1,23 @@
 package com.raft.client.ui;
 
+import java.io.File;
+import java.util.UUID;
+
 import com.raft.client.network.ClientService;
 import com.raft.client.protocol.Response;
+
 import javafx.application.Platform;
 import javafx.geometry.Insets;
-import javafx.scene.control.*;
+import javafx.scene.control.Alert;
+import javafx.scene.control.Button;
+import javafx.scene.control.Label;
+import javafx.scene.control.ProgressIndicator;
+import javafx.scene.control.TextArea;
+import javafx.scene.control.TextField;
 import javafx.scene.layout.GridPane;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.VBox;
 import javafx.stage.FileChooser;
-
-import java.io.File;
 
 /**
  * Panel para entrenar modelos de IA.
@@ -51,9 +58,9 @@ public class TrainPanel extends VBox {
 
         HBox fileBox = new HBox(10, fileField, browseButton);
 
-        Label nameLabel = new Label("Nombre del modelo:");
+        Label nameLabel = new Label("Prefijo del modelo (opcional):");
         modelNameField = new TextField();
-        modelNameField.setPromptText("mi-modelo");
+        modelNameField.setPromptText("ej: clasificador (se añadirá UUID automático)");
         modelNameField.setPrefWidth(300);
 
         formGrid.add(fileLabel, 0, 0);
@@ -105,17 +112,16 @@ public class TrainPanel extends VBox {
 
     private void startTraining() {
         String filePath = fileField.getText();
-        String modelName = modelNameField.getText().trim();
+        String prefix = modelNameField.getText().trim();
 
         if (filePath.isEmpty()) {
             showAlert(Alert.AlertType.ERROR, "Error", "Debes seleccionar un archivo de entrenamiento");
             return;
         }
 
-        if (modelName.isEmpty()) {
-            showAlert(Alert.AlertType.ERROR, "Error", "Debes especificar un nombre para el modelo");
-            return;
-        }
+        // Generar ID único automáticamente (el sistema asigna el identificador)
+        String uuid = UUID.randomUUID().toString().substring(0, 8);
+        String modelName = prefix.isEmpty() ? "model-" + uuid : prefix + "-" + uuid;
 
         File file = new File(filePath);
         if (!file.exists()) {
@@ -128,7 +134,7 @@ public class TrainPanel extends VBox {
         logArea.appendText("=== Iniciando entrenamiento ===\n");
         logArea.appendText("Archivo: " + file.getName() + "\n");
         logArea.appendText("Tamaño: " + (file.length() / 1024) + " KB\n");
-        logArea.appendText("Modelo: " + modelName + "\n");
+        logArea.appendText("ID asignado por el sistema: " + modelName + "\n");
         logArea.appendText("Servidor: " + clientService.getCurrentServer() + "\n\n");
 
         new Thread(() -> {
