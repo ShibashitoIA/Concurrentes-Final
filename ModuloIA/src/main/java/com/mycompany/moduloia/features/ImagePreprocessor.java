@@ -1,10 +1,12 @@
 package com.mycompany.moduloia.features;
 
-import javax.imageio.ImageIO;
 import java.awt.Graphics2D;
 import java.awt.RenderingHints;
 import java.awt.image.BufferedImage;
+import java.io.ByteArrayInputStream;
 import java.nio.file.Path;
+
+import javax.imageio.ImageIO;
 
 public class ImagePreprocessor {
 
@@ -18,16 +20,42 @@ public class ImagePreprocessor {
             if (original == null) {
                 throw new IllegalArgumentException("Unsupported or unreadable image: " + imagePath);
             }
-
-            BufferedImage resized = resize(original, targetWidth, targetHeight);
-
-            if (grayscale) {
-                return toGrayscaleVector(resized, normalizeToUnit);
-            }
-            return toRgbVector(resized, normalizeToUnit);
+            return preprocessImage(original, targetWidth, targetHeight, grayscale, normalizeToUnit);
         } catch (Exception e) {
             throw new RuntimeException("Failed to preprocess image: " + imagePath, e);
         }
+    }
+    
+    /**
+     * Preprocesa una imagen desde bytes (para predicción con imágenes enviadas directamente)
+     */
+    public static double[] preprocessFromBytes(byte[] imageBytes,
+                                               int targetWidth,
+                                               int targetHeight,
+                                               boolean grayscale,
+                                               boolean normalizeToUnit) {
+        try {
+            BufferedImage original = ImageIO.read(new ByteArrayInputStream(imageBytes));
+            if (original == null) {
+                throw new IllegalArgumentException("Unsupported or unreadable image from bytes");
+            }
+            return preprocessImage(original, targetWidth, targetHeight, grayscale, normalizeToUnit);
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to preprocess image from bytes", e);
+        }
+    }
+    
+    private static double[] preprocessImage(BufferedImage original,
+                                            int targetWidth,
+                                            int targetHeight,
+                                            boolean grayscale,
+                                            boolean normalizeToUnit) {
+        BufferedImage resized = resize(original, targetWidth, targetHeight);
+
+        if (grayscale) {
+            return toGrayscaleVector(resized, normalizeToUnit);
+        }
+        return toRgbVector(resized, normalizeToUnit);
     }
 
     private static BufferedImage resize(BufferedImage src, int w, int h) {

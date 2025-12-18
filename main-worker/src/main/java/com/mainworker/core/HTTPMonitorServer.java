@@ -226,11 +226,17 @@ public class HTTPMonitorServer {
                 return;
             }
 
-            // Leer el comando del body
-            try (java.io.BufferedReader reader = new java.io.BufferedReader(
-                    new java.io.InputStreamReader(exchange.getRequestBody(), StandardCharsets.UTF_8))) {
-
-                String command = reader.readLine();
+            // Leer el comando completo del body (puede ser muy largo para imágenes)
+            try {
+                java.io.InputStream is = exchange.getRequestBody();
+                java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
+                byte[] buffer = new byte[8192];
+                int len;
+                while ((len = is.read(buffer)) != -1) {
+                    baos.write(buffer, 0, len);
+                }
+                String command = new String(baos.toByteArray(), StandardCharsets.UTF_8);
+                
                 if (command == null || command.trim().isEmpty()) {
                     String json = "{\"error\":\"Empty command\"}";
                     sendResponse(exchange, 400, json, "application/json");
@@ -238,17 +244,44 @@ public class HTTPMonitorServer {
                 }
 
                 command = command.trim();
+                
+                // Extraer requestId si es un comando PREDICT
+                String requestId = null;
+                if (command.startsWith("PREDICT|")) {
+                    String[] parts = command.split("\\|", 3);
+                    if (parts.length >= 2) {
+                        requestId = parts[1];
+                    }
+                }
 
                 // Enviar comando al RaftNode
                 byte[] commandBytes = command.getBytes(StandardCharsets.UTF_8);
                 boolean success = raftNode.appendCommand(commandBytes);
 
                 if (success) {
-                    String json = String.format(
-                        "{\"success\":true,\"command\":\"%s\",\"message\":\"Command appended to log\"}",
-                        command.length() > 50 ? command.substring(0, 50) + "..." : command
-                    );
-                    sendResponse(exchange, 200, json, "application/json");
+                    // Si es un comando PREDICT, esperar el resultado
+                    if (requestId != null) {
+                        String result = waitForPredictionResult(requestId, 30000); // 30 segundos timeout
+                        if (result != null) {
+                            // Parsear resultado y encontrar la clase con mayor probabilidad
+                            int predictedClass = findPredictedClass(result);
+                            // Estructura con "data" para que el cliente UI pueda leer getData().get("prediction")
+                            String json = String.format(
+                                "{\"success\":true,\"data\":{\"prediction\":\"%d\",\"probabilities\":\"%s\",\"requestId\":\"%s\"}}",
+                                predictedClass, result, requestId
+                            );
+                            sendResponse(exchange, 200, json, "application/json");
+                        } else {
+                            String json = "{\"success\":false,\"error\":\"Prediction timeout\"}";
+                            sendResponse(exchange, 500, json, "application/json");
+                        }
+                    } else {
+                        String json = String.format(
+                            "{\"success\":true,\"command\":\"%s\",\"message\":\"Command appended to log\"}",
+                            command.length() > 50 ? command.substring(0, 50) + "..." : command
+                        );
+                        sendResponse(exchange, 200, json, "application/json");
+                    }
                 } else {
                     String json = "{\"error\":\"Failed to append command\",\"success\":false}";
                     sendResponse(exchange, 500, json, "application/json");
@@ -261,6 +294,53 @@ public class HTTPMonitorServer {
                 );
                 sendResponse(exchange, 500, json, "application/json");
             }
+        }
+        
+        private String waitForPredictionResult(String requestId, long timeoutMs) {
+            long start = System.currentTimeMillis();
+            while (System.currentTimeMillis() - start < timeoutMs) {
+                String result = stateMachine.getPredictionResult(requestId);
+                if (result != null) {
+                    return result;
+                }
+                try {
+                    Thread.sleep(100); // Polling cada 100ms
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    return null;
+                }
+            }
+            return null;
+        }
+        
+        private int findPredictedClass(String probabilities) {
+            // Formato esperado: "[0.1,0.2,0.7,...]" o "0.1,0.2,0.7,..." - encontrar índice del máximo
+            if (probabilities == null || probabilities.startsWith("ERROR")) {
+                return -1;
+            }
+            // Limpiar corchetes si existen
+            String cleaned = probabilities.trim();
+            if (cleaned.startsWith("[")) {
+                cleaned = cleaned.substring(1);
+            }
+            if (cleaned.endsWith("]")) {
+                cleaned = cleaned.substring(0, cleaned.length() - 1);
+            }
+            String[] values = cleaned.split(",");
+            int maxIndex = 0;
+            double maxValue = Double.NEGATIVE_INFINITY;
+            for (int i = 0; i < values.length; i++) {
+                try {
+                    double val = Double.parseDouble(values[i].trim());
+                    if (val > maxValue) {
+                        maxValue = val;
+                        maxIndex = i;
+                    }
+                } catch (NumberFormatException e) {
+                    // Ignorar valores no numéricos
+                }
+            }
+            return maxIndex;
         }
     }
 

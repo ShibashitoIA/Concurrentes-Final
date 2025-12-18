@@ -1,9 +1,6 @@
 package com.rafthq.core;
 
-import java.io.BufferedReader;
 import java.io.IOException;
-import java.io.InputStreamReader;
-import java.io.PrintWriter;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.util.concurrent.ExecutorService;
@@ -17,6 +14,9 @@ import java.util.logging.Logger;
  */
 public class RpcServer {
     private static final Logger LOG = Logger.getLogger(RpcServer.class.getName());
+    
+    // Maximum message size: 50MB (enough for large image datasets)
+    private static final int MAX_MESSAGE_SIZE = 50 * 1024 * 1024;
 
     private final String host;
     private final int port;
@@ -44,12 +44,32 @@ public class RpcServer {
     }
 
     private void handleSocket(Socket socket) {
-        try (BufferedReader reader = new BufferedReader(new InputStreamReader(socket.getInputStream()));
-             PrintWriter writer = new PrintWriter(socket.getOutputStream(), true)) {
-            String line = reader.readLine();
-            if (line != null) {
+        try {
+            socket.setSoTimeout(60000); // 60 second timeout for large payloads
+            
+            // Read length-prefixed message
+            java.io.DataInputStream dis = new java.io.DataInputStream(socket.getInputStream());
+            int messageLen = dis.readInt();
+            
+            // Validate message size to prevent OutOfMemoryError
+            if (messageLen <= 0 || messageLen > MAX_MESSAGE_SIZE) {
+                LOG.warning("Invalid message length: " + messageLen + ", rejecting connection");
+                return;
+            }
+            
+            byte[] messageBytes = new byte[messageLen];
+            dis.readFully(messageBytes);
+            String line = new String(messageBytes, java.nio.charset.StandardCharsets.UTF_8);
+            
+            if (line != null && !line.isEmpty()) {
                 String response = handler.apply(line);
-                writer.println(response);
+                
+                // Send length-prefixed response
+                java.io.DataOutputStream dos = new java.io.DataOutputStream(socket.getOutputStream());
+                byte[] responseBytes = response.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+                dos.writeInt(responseBytes.length);
+                dos.write(responseBytes);
+                dos.flush();
             }
         } catch (IOException e) {
             LOG.log(Level.FINE, "RPC connection error", e);

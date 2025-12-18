@@ -2,6 +2,7 @@ package com.mycompany.moduloia.api;
 
 public class TrainingRequest {
 
+    public final String modelId;  // Optional: if null, AIService generates one
     public final InputType inputType;
     public final String datasetPath;
 
@@ -21,6 +22,7 @@ public class TrainingRequest {
     public final int imageHeight;
     public final boolean grayscale;
 
+    // Constructor without modelId (backward compatible - AIService will generate one)
     public TrainingRequest(InputType inputType,
                            String datasetPath,
                            int inputSize,
@@ -33,6 +35,25 @@ public class TrainingRequest {
                            int imageWidth,
                            int imageHeight,
                            boolean grayscale) {
+        this(null, inputType, datasetPath, inputSize, outputSize, epochs, learningRate,
+             numThreads, hasHeader, maxVocab, imageWidth, imageHeight, grayscale);
+    }
+
+    // Constructor with modelId (for distributed systems where ID must be consistent)
+    public TrainingRequest(String modelId,
+                           InputType inputType,
+                           String datasetPath,
+                           int inputSize,
+                           int outputSize,
+                           int epochs,
+                           double learningRate,
+                           int numThreads,
+                           boolean hasHeader,
+                           int maxVocab,
+                           int imageWidth,
+                           int imageHeight,
+                           boolean grayscale) {
+        this.modelId = modelId;
         this.inputType = inputType;
         this.datasetPath = datasetPath;
         this.inputSize = inputSize;

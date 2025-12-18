@@ -10,6 +10,7 @@ public class PredictRequest {
 
     // IMAGE
     public final String imagePath;
+    public final byte[] imageBytes;  // Para predicción con bytes directos
 
     public PredictRequest(InputType inputType,
                           String modelId,
@@ -21,6 +22,21 @@ public class PredictRequest {
         this.tabularInput = tabularInput;
         this.textInput = textInput;
         this.imagePath = imagePath;
+        this.imageBytes = null;
+    }
+    
+    public PredictRequest(InputType inputType,
+                          String modelId,
+                          double[] tabularInput,
+                          String textInput,
+                          String imagePath,
+                          byte[] imageBytes) {
+        this.inputType = inputType;
+        this.modelId = modelId;
+        this.tabularInput = tabularInput;
+        this.textInput = textInput;
+        this.imagePath = imagePath;
+        this.imageBytes = imageBytes;
     }
 }
 

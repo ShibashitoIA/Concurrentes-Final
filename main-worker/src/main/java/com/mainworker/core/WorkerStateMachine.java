@@ -1,11 +1,20 @@
 package com.mainworker.core;
 
 import com.rafthq.core.StateMachine;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.Base64;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.logging.Logger;
 import java.util.logging.Level;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
 
 /**
  * State Machine del Worker Principal
@@ -178,9 +187,22 @@ public class WorkerStateMachine implements StateMachine {
             // Obtener ruta absoluta del dataset
             String fullDatasetPath = fileManager.getFilePath(datasetPath);
 
-            // Llamar al módulo de IA (actualmente es un stub)
-            // En producción, esto iniciará el entrenamiento en background
+            // Si es un ZIP, descomprimirlo y buscar el TSV
+            if (fullDatasetPath.endsWith(".zip")) {
+                LOGGER.info("Extracting ZIP file: " + fullDatasetPath);
+                String extractedPath = extractZipAndFindTsv(fullDatasetPath);
+                if (extractedPath != null) {
+                    fullDatasetPath = extractedPath;
+                    LOGGER.info("Using extracted TSV: " + fullDatasetPath);
+                } else {
+                    LOGGER.severe("No TSV file found in ZIP");
+                    return;
+                }
+            }
+
+            // Llamar al módulo de IA (passing modelId from command)
             String resultModelId = aiServiceAdapter.trainModel(
+                modelId,  // Pass the modelId from the RAFT command
                 inputType,
                 fullDatasetPath,
                 inputSize,
@@ -211,6 +233,86 @@ public class WorkerStateMachine implements StateMachine {
     }
 
     /**
+     * Extrae un archivo ZIP y busca el archivo TSV dentro
+     */
+    private String extractZipAndFindTsv(String zipPath) {
+        Path zipFile = Paths.get(zipPath).toAbsolutePath().normalize();
+        Path extractDir = zipFile.getParent().resolve(zipFile.getFileName().toString().replace(".zip", "_extracted")).normalize();
+        
+        try {
+            Files.createDirectories(extractDir);
+            LOGGER.info("Extracting to: " + extractDir);
+            
+            // Extraer ZIP
+            try (ZipInputStream zis = new ZipInputStream(new FileInputStream(zipFile.toFile()))) {
+                ZipEntry entry;
+                while ((entry = zis.getNextEntry()) != null) {
+                    String entryName = entry.getName();
+                    Path outputPath = extractDir.resolve(entryName).normalize();
+                    
+                    // Prevenir zip slip - ambas rutas deben estar normalizadas
+                    if (!outputPath.startsWith(extractDir)) {
+                        LOGGER.warning("Skipping potentially unsafe ZIP entry: " + entryName);
+                        zis.closeEntry();
+                        continue;
+                    }
+                    
+                    if (entry.isDirectory()) {
+                        Files.createDirectories(outputPath);
+                        LOGGER.fine("Created directory: " + outputPath);
+                    } else {
+                        Files.createDirectories(outputPath.getParent());
+                        try (FileOutputStream fos = new FileOutputStream(outputPath.toFile())) {
+                            byte[] buffer = new byte[8192];
+                            int len;
+                            while ((len = zis.read(buffer)) > 0) {
+                                fos.write(buffer, 0, len);
+                            }
+                        }
+                    }
+                    zis.closeEntry();
+                }
+            }
+            
+            // Buscar archivo TSV en el directorio extraído
+            return findTsvFile(extractDir);
+            
+        } catch (Exception e) {
+            LOGGER.log(Level.SEVERE, "Failed to extract ZIP: " + zipPath, e);
+            return null;
+        }
+    }
+    
+    /**
+     * Busca recursivamente un archivo TSV en un directorio
+     */
+    private String findTsvFile(Path dir) {
+        try {
+            // Primero buscar en el directorio raíz
+            File[] files = dir.toFile().listFiles();
+            if (files != null) {
+                for (File f : files) {
+                    if (f.isFile() && f.getName().endsWith(".tsv")) {
+                        return f.getAbsolutePath();
+                    }
+                }
+                // Si no hay TSV en raíz, buscar en subdirectorios
+                for (File f : files) {
+                    if (f.isDirectory()) {
+                        String found = findTsvFile(f.toPath());
+                        if (found != null) {
+                            return found;
+                        }
+                    }
+                }
+            }
+        } catch (Exception e) {
+            LOGGER.log(Level.WARNING, "Error searching for TSV in: " + dir, e);
+        }
+        return null;
+    }
+
+    /**
      * PREDICT|requestId|modelId|inputType|inputDataBase64
      */
     private void handlePredict(String[] parts) {
@@ -232,8 +334,14 @@ public class WorkerStateMachine implements StateMachine {
                 return;
             }
 
-            // Decodificar input
-            String inputData = new String(Base64.getDecoder().decode(inputDataBase64), StandardCharsets.UTF_8);
+            String inputData;
+            if ("IMAGE".equals(inputType)) {
+                // Para imágenes, pasar el base64 directamente (NO convertir a UTF-8 string)
+                inputData = inputDataBase64;
+            } else {
+                // Para texto/tabular, decodificar el base64 a string
+                inputData = new String(Base64.getDecoder().decode(inputDataBase64), StandardCharsets.UTF_8);
+            }
 
             LOGGER.info("Predicting with model: " + modelId + ", input type: " + inputType);
 
@@ -346,12 +454,12 @@ public class WorkerStateMachine implements StateMachine {
             }
         }
 
-        public String trainModel(String inputType, String datasetPath, int inputSize, int outputSize,
+        public String trainModel(String providedModelId, String inputType, String datasetPath, int inputSize, int outputSize,
                                  int epochs, double learningRate, int numThreads, boolean hasHeader,
                                  int maxVocab, int imageWidth, int imageHeight, boolean grayscale) {
 
             if (!aiServiceAvailable) {
-                String modelId = "stub-model-" + System.currentTimeMillis();
+                String modelId = providedModelId != null ? providedModelId : "stub-model-" + System.currentTimeMillis();
                 LOGGER.info("AIService stub: would train " + inputType + " model with dataset: " + datasetPath);
                 return modelId;
             }
@@ -362,11 +470,12 @@ public class WorkerStateMachine implements StateMachine {
 
                 Object inputTypeEnum = Enum.valueOf((Class<Enum>) inputTypeClass, inputType);
 
+                // Use constructor with modelId (new constructor)
                 Object trainingRequest = trainingRequestClass.getConstructor(
-                    inputTypeClass, String.class, int.class, int.class, int.class, double.class,
+                    String.class, inputTypeClass, String.class, int.class, int.class, int.class, double.class,
                     int.class, boolean.class, int.class, int.class, int.class, boolean.class
                 ).newInstance(
-                    inputTypeEnum, datasetPath, inputSize, outputSize, epochs, learningRate,
+                    providedModelId, inputTypeEnum, datasetPath, inputSize, outputSize, epochs, learningRate,
                     numThreads, hasHeader, maxVocab, imageWidth, imageHeight, grayscale
                 );
 
@@ -414,9 +523,13 @@ public class WorkerStateMachine implements StateMachine {
                     ).newInstance(inputTypeEnum, modelId, null, inputData, null);
 
                 } else if ("IMAGE".equals(inputType)) {
+                    // inputData contiene los bytes de la imagen en base64
+                    // Decodificar y pasar como imageBytes
+                    byte[] imageBytes = Base64.getDecoder().decode(inputData);
+                    
                     predictRequest = predictRequestClass.getConstructor(
-                        inputTypeClass, String.class, double[].class, String.class, String.class
-                    ).newInstance(inputTypeEnum, modelId, null, null, inputData);
+                        inputTypeClass, String.class, double[].class, String.class, String.class, byte[].class
+                    ).newInstance(inputTypeEnum, modelId, null, null, null, imageBytes);
 
                 } else {
                     throw new IllegalArgumentException("Unsupported input type: " + inputType);

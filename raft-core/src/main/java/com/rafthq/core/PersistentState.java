@@ -1,6 +1,7 @@
 package com.rafthq.core;
 
-import java.io.*;
+import java.io.BufferedWriter;
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -21,6 +22,7 @@ public class PersistentState {
     private final Path termFile;
     private final Path votedForFile;
     private final Path logFile;
+    private final Path lastAppliedFile;
 
     public PersistentState(String storageDirPath) throws IOException {
         this.storageDir = Paths.get(storageDirPath);
@@ -29,6 +31,7 @@ public class PersistentState {
         this.termFile = storageDir.resolve("term.txt");
         this.votedForFile = storageDir.resolve("votedFor.txt");
         this.logFile = storageDir.resolve("log.txt");
+        this.lastAppliedFile = storageDir.resolve("lastApplied.txt");
     }
 
     public int loadTerm() {
@@ -71,6 +74,26 @@ public class PersistentState {
             }
         } catch (IOException e) {
             LOG.severe("Failed to save votedFor: " + e.getMessage());
+        }
+    }
+
+    public int loadLastApplied() {
+        try {
+            if (Files.exists(lastAppliedFile)) {
+                String content = Files.readString(lastAppliedFile, StandardCharsets.UTF_8).trim();
+                return Integer.parseInt(content);
+            }
+        } catch (IOException | NumberFormatException e) {
+            LOG.warning("Failed to load lastApplied: " + e.getMessage());
+        }
+        return 0;
+    }
+
+    public void saveLastApplied(int lastApplied) {
+        try {
+            Files.writeString(lastAppliedFile, String.valueOf(lastApplied), StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            LOG.severe("Failed to save lastApplied: " + e.getMessage());
         }
     }
 

@@ -1,19 +1,21 @@
 package com.raft.client.network;
 
-import com.raft.client.protocol.*;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.security.MessageDigest;
-import java.util.Base64;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import com.raft.client.protocol.ModelInfo;
+import com.raft.client.protocol.Response;
 
 /**
  * Servicio de alto nivel que encapsula las operaciones del cliente.
@@ -79,6 +81,14 @@ public class ClientService {
     public Response trainImageModel(File imageFolder, String modelName, int width, int height, boolean isColor) throws IOException {
         logger.info("Entrenando modelo de imágenes '{}' desde: {}", modelName, imageFolder.getAbsolutePath());
 
+        // Detectar número de clases (subcarpetas)
+        int numClasses = countSubdirectories(imageFolder);
+        if (numClasses <= 0) {
+            logger.warn("No se encontraron subcarpetas (clases) en: {}", imageFolder.getAbsolutePath());
+            return new Response(false, "No se encontraron subcarpetas de clases en la carpeta seleccionada");
+        }
+        logger.info("Detectadas {} clases (subcarpetas)", numClasses);
+
         // Empaquetar carpeta a ZIP en memoria
         byte[] zipBytes = ZipUtils.zipDirectoryToBytes(imageFolder);
         String zipName = imageFolder.getName() + ".zip";
@@ -101,7 +111,7 @@ public class ClientService {
         }
 
         // 2) TRAIN_MODEL (IMAGE) con hiperparámetros por defecto
-        String hyperparams = buildDefaultImageHyperparams(width, height, !isColor);
+        String hyperparams = buildDefaultImageHyperparams(width, height, !isColor, numClasses);
         String[] hpArr = hyperparams.split(",", -1);
         if (hpArr.length != 10) {
             logger.warn("Hyperparams IMAGE no tienen 10 campos: {} -> {} campos", hyperparams, hpArr.length);
@@ -411,13 +421,13 @@ public class ClientService {
         );
     }
 
-    private static String buildDefaultImageHyperparams(int width, int height, boolean grayscale) {
-        // Campos no usados para imagen los marcamos 0 o defaults
+    private static String buildDefaultImageHyperparams(int width, int height, boolean grayscale, int numClasses) {
+        // inputSize se calcula automáticamente por el extractor de imágenes
         int inputSize = 0;
-        int outputSize = 0;
+        int outputSize = numClasses;  // Número de clases detectadas
         int epochs = 10;
         double learningRate = 0.01;
-        int numThreads = 1;
+        int numThreads = Runtime.getRuntime().availableProcessors();  // Usar todos los cores
         boolean hasHeader = false;
         int maxVocab = 0;
         return String.join(",",
@@ -432,6 +442,26 @@ public class ClientService {
                 String.valueOf(height),
                 String.valueOf(grayscale)
         );
+    }
+
+    /**
+     * Cuenta el número de subdirectorios (clases) en una carpeta.
+     */
+    private static int countSubdirectories(File folder) {
+        if (folder == null || !folder.isDirectory()) {
+            return 0;
+        }
+        File[] files = folder.listFiles();
+        if (files == null) {
+            return 0;
+        }
+        int count = 0;
+        for (File f : files) {
+            if (f.isDirectory()) {
+                count++;
+            }
+        }
+        return count;
     }
 
     private static String safeString(Object o) {

@@ -78,8 +78,14 @@ public class RaftNode {
             for (RaftLogEntry entry : entries) {
                 log.append(entry);
             }
+            // Load lastApplied to avoid re-applying commands on restart
+            int loadedLastApplied = persistence.loadLastApplied();
+            lastApplied = loadedLastApplied;
+            commitIndex = loadedLastApplied; // commitIndex should be at least lastApplied
+            
             if (loadedTerm > 0 || !entries.isEmpty()) {
-                LOG.info(() -> "Loaded: term=" + loadedTerm + " votedFor=" + loadedVotedFor + " entries=" + entries.size());
+                LOG.info(() -> "Loaded: term=" + loadedTerm + " votedFor=" + loadedVotedFor + 
+                         " entries=" + entries.size() + " lastApplied=" + loadedLastApplied);
             }
         } catch (Exception e) {
             LOG.log(Level.WARNING, "Failed to load persistent state", e);
@@ -436,6 +442,8 @@ public class RaftNode {
                     byte[] command = entry.get().getPayload();
                     try {
                         stateMachine.onCommit(command);
+                        // Persist lastApplied so we don't re-apply on restart
+                        persistence.saveLastApplied(lastApplied);
                         LOG.fine(() -> "Applied entry " + lastApplied + " to state machine");
                     } catch (Exception e) {
                         LOG.log(Level.WARNING, "State machine error at index " + lastApplied, e);

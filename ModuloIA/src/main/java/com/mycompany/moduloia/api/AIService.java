@@ -1,5 +1,12 @@
 package com.mycompany.moduloia.api;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+
 import com.mycompany.moduloia.data.ImagePathDataset;
 import com.mycompany.moduloia.data.ImageTsvLoader;
 import com.mycompany.moduloia.data.TabularCsvLoader;
@@ -12,19 +19,11 @@ import com.mycompany.moduloia.features.TfidfVectorizer;
 import com.mycompany.moduloia.mlp.HiddenActivation;
 import com.mycompany.moduloia.mlp.MLP;
 import com.mycompany.moduloia.mlp.OutputActivation;
+import com.mycompany.moduloia.mlp.ParallelMLPTrainer;
 import com.mycompany.moduloia.mlp.TrainingSample;
 import com.mycompany.moduloia.storage.ModelBundle;
 import com.mycompany.moduloia.storage.ModelRegistry;
 import com.mycompany.moduloia.storage.ModelSerializer;
-import com.mycompany.moduloia.mlp.ParallelMLPTrainer;
-
-
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
 
 public class AIService {
 
@@ -52,7 +51,10 @@ public class AIService {
     }
 
     public String trainModel(TrainingRequest req) {
-        String modelId = UUID.randomUUID().toString();
+        // Use provided modelId or generate a new one
+        String modelId = (req.modelId != null && !req.modelId.isEmpty()) 
+                         ? req.modelId 
+                         : UUID.randomUUID().toString();
 
         List<double[]> x;
         List<double[]> y;
@@ -165,12 +167,17 @@ public class AIService {
             features = ex.transformOne(req.textInput);
 
         } else if (bundle.inputType == InputType.IMAGE) {
-            if (req.imagePath == null) {
-                throw new IllegalArgumentException("IMAGE predict requires imagePath");
-            }
             ImageExtractor ex = new ImageExtractor(1, 1, true);
             ex.loadState(bundle.extractorState);
-            features = ex.transformOne(req.imagePath);
+            
+            // Preferir bytes si están disponibles, sino usar path
+            if (req.imageBytes != null && req.imageBytes.length > 0) {
+                features = ex.transformFromBytes(req.imageBytes);
+            } else if (req.imagePath != null) {
+                features = ex.transformOne(req.imagePath);
+            } else {
+                throw new IllegalArgumentException("IMAGE predict requires imageBytes or imagePath");
+            }
 
         } else {
             throw new IllegalArgumentException("Unsupported inputType: " + bundle.inputType);

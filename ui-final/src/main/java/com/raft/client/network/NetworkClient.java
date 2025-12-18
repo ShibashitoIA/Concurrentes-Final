@@ -1,11 +1,5 @@
 package com.raft.client.network;
 
-import com.google.gson.Gson;
-import com.google.gson.JsonSyntaxException;
-import com.raft.client.protocol.Response;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
 import java.io.ByteArrayOutputStream;
@@ -16,6 +10,13 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import com.google.gson.Gson;
+import com.google.gson.JsonSyntaxException;
+import com.raft.client.protocol.Response;
+
 /**
  * Cliente HTTP para el monitor del main-worker.
  * Envía comandos como texto (OP|arg1|...) a POST /command y
@@ -24,7 +25,7 @@ import java.nio.charset.StandardCharsets;
 public class NetworkClient {
     private static final Logger logger = LoggerFactory.getLogger(NetworkClient.class);
     private static final int MAX_REDIRECTS = 5;
-    private static final int TIMEOUT_MS = 10000; // 10 segundos
+    private static final int TIMEOUT_MS = 60000; // 60 segundos para predicciones
 
     private final Gson gson;
     private String currentHost;

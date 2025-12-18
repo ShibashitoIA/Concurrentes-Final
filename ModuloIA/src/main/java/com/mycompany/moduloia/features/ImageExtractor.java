@@ -42,6 +42,19 @@ public class ImageExtractor implements FeatureExtractor<String> {
                 true
         );
     }
+    
+    /**
+     * Transforma bytes de imagen directamente (para predicción)
+     */
+    public double[] transformFromBytes(byte[] imageBytes) {
+        return ImagePreprocessor.preprocessFromBytes(
+                imageBytes,
+                width,
+                height,
+                grayscale,
+                true
+        );
+    }
 
     @Override
     public byte[] serializeState() {
